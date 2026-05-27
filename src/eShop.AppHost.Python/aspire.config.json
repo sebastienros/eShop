@@ -12,7 +12,6 @@
       "applicationUrl": "https://localhost:29429;http://localhost:11969",
       "environmentVariables": {
         "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
-        "ASPIRE_DCP_USE_DEVELOPER_CERTIFICATE": "false",
         "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://localhost:12829",
         "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://localhost:11040"
       }
