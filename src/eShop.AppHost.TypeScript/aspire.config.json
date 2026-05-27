@@ -1,0 +1,27 @@
+{
+  "appHost": {
+    "path": "apphost.mts",
+    "language": "typescript/nodejs"
+  },
+  "sdk": {
+    "version": "13.4.0-preview.1.26276.10"
+  },
+  "channel": "daily",
+  "profiles": {
+    "https": {
+      "applicationUrl": "https://localhost:17002;http://localhost:15096",
+      "environmentVariables": {
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "ASPIRE_DCP_USE_DEVELOPER_CERTIFICATE": "false",
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "https://localhost:21003",
+        "ASPIRE_RESOURCE_SERVICE_ENDPOINT_URL": "https://localhost:22036"
+      }
+    }
+  },
+  "packages": {
+    "Aspire.Hosting.Redis": "13.4.0-preview.1.26276.10",
+    "Aspire.Hosting.PostgreSQL": "13.4.0-preview.1.26276.10",
+    "Aspire.Hosting.RabbitMQ": "13.4.0-preview.1.26276.10",
+    "Aspire.Hosting.Yarp": "13.4.0-preview.1.26276.10"
+  }
+}

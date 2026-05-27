@@ -81,6 +81,27 @@ Login to the dashboard at: http://localhost:19888/login?t=uniquelogincodeforyou
 
 > You may need to install ASP.NET Core HTTPS development certificates first, and then close all browser tabs. Learn more at https://aka.ms/aspnet/https-trust-dev-cert
 
+### Polyglot Aspire AppHosts
+
+This repository also includes experimental Aspire AppHosts for TypeScript, Python, Java, and Go under `src/eShop.AppHost.*`. They model the same eShop resources as the canonical .NET AppHost and use the locally installed Aspire 13.4 preview SDK.
+
+Enable the experimental polyglot runtimes once:
+
+```sh
+aspire config set features.experimentalPolyglot:python true --global
+aspire config set features.experimentalPolyglot:java true --global
+aspire config set features.experimentalPolyglot:go true --global
+```
+
+Run any AppHost from its directory:
+
+```sh
+cd src/eShop.AppHost.TypeScript && aspire run
+cd src/eShop.AppHost.Python && aspire run
+cd src/eShop.AppHost.Java && aspire run
+cd src/eShop.AppHost.Go && aspire run
+```
+
 ### Azure Open AI
 
 When using Azure OpenAI, inside *eShop.AppHost/appsettings.json*, add the following section:
