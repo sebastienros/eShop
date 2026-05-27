@@ -2,6 +2,19 @@ from aspire_app import create_builder
 
 LAUNCH_PROFILE_NAME = "http" if __import__("os").environ.get("ESHOP_USE_HTTP_ENDPOINTS") == "1" else "https"
 
+ENDPOINT_PORTS = {
+    "basket_api": {"http": 25221},
+    "catalog_api": {"http": 25222},
+    "identity_api": {"http": 25223, "https": 25243},
+    "ordering_api": {"http": 25224},
+    "payment_processor": {"http": 25226},
+    "webhooks_api": {"http": 25227},
+    "web_app": {"http": 25045, "https": 27298},
+    "webhooks_client": {"http": 25062, "https": 27260},
+    "order_processor": {"http": 36888},
+    "mobile_bff": {"http": 25080},
+}
+
 
 def project_path(name: str) -> str:
     return f"../{name}/{name}.csproj"
@@ -23,6 +36,13 @@ def catalog_route(yarp, catalog_cluster, path: str, versions: list[str]):
         .with_match_route_query_parameter([api_version(versions)])
         .with_transform_path_remove_prefix("/catalog-api")
     )
+
+
+def with_project_endpoints(resource, ports: dict[str, int]):
+    resource.with_http_endpoint(name="http", port=ports["http"])
+    if LAUNCH_PROFILE_NAME == "https" and "https" in ports:
+        resource.with_https_endpoint(name="https", port=ports["https"])
+    return resource
 
 
 def configure_mobile_bff_routes(yarp):
@@ -63,78 +83,110 @@ with create_builder() as builder:
     order_db = postgres.add_database("orderingdb")
     webhooks_db = postgres.add_database("webhooksdb")
 
-    identity_api = (
-        add_project(builder, "identity-api", project_path("Identity.API"), LAUNCH_PROFILE_NAME)
-        .with_external_http_endpoints()
-        .with_reference(identity_db)
-        .with_http_health_check(path="/health")
+    identity_api = with_project_endpoints(
+        (
+            add_project(builder, "identity-api", project_path("Identity.API"), LAUNCH_PROFILE_NAME)
+            .with_external_http_endpoints()
+            .with_reference(identity_db)
+            .with_http_health_check(path="/health")
+        ),
+        ENDPOINT_PORTS["identity_api"],
     )
 
     identity_endpoint = identity_api.get_endpoint(LAUNCH_PROFILE_NAME)
 
-    basket_api = (
-        add_project(builder, "basket-api", project_path("Basket.API"))
-        .with_reference(redis)
-        .with_reference(rabbit_mq)
-        .wait_for(rabbit_mq)
-        .with_env("Identity__Url", identity_endpoint)
+    basket_api = with_project_endpoints(
+        (
+            add_project(builder, "basket-api", project_path("Basket.API"))
+            .with_reference(redis)
+            .with_reference(rabbit_mq)
+            .wait_for(rabbit_mq)
+            .with_env("Identity__Url", identity_endpoint)
+        ),
+        ENDPOINT_PORTS["basket_api"],
     )
 
-    catalog_api = (
-        add_project(builder, "catalog-api", project_path("Catalog.API"))
-        .with_reference(rabbit_mq)
-        .wait_for(rabbit_mq)
-        .with_reference(catalog_db)
+    catalog_api = with_project_endpoints(
+        (
+            add_project(builder, "catalog-api", project_path("Catalog.API"))
+            .with_reference(rabbit_mq)
+            .wait_for(rabbit_mq)
+            .with_reference(catalog_db)
+        ),
+        ENDPOINT_PORTS["catalog_api"],
     )
 
-    ordering_api = (
-        add_project(builder, "ordering-api", project_path("Ordering.API"))
-        .with_reference(rabbit_mq)
-        .wait_for(rabbit_mq)
-        .with_reference(order_db)
-        .wait_for(order_db)
-        .with_http_health_check(path="/health")
-        .with_env("Identity__Url", identity_endpoint)
+    ordering_api = with_project_endpoints(
+        (
+            add_project(builder, "ordering-api", project_path("Ordering.API"))
+            .with_reference(rabbit_mq)
+            .wait_for(rabbit_mq)
+            .with_reference(order_db)
+            .wait_for(order_db)
+            .with_http_health_check(path="/health")
+            .with_env("Identity__Url", identity_endpoint)
+        ),
+        ENDPOINT_PORTS["ordering_api"],
+    )
+
+    with_project_endpoints(
+        (
+            add_project(builder, "order-processor", project_path("OrderProcessor"))
+            .with_reference(rabbit_mq)
+            .wait_for(rabbit_mq)
+            .with_reference(order_db)
+            .wait_for(ordering_api)
+        ),
+        ENDPOINT_PORTS["order_processor"],
+    )
+
+    with_project_endpoints(
+        add_project(builder, "payment-processor", project_path("PaymentProcessor")).with_reference(rabbit_mq).wait_for(
+            rabbit_mq
+        ),
+        ENDPOINT_PORTS["payment_processor"],
+    )
+
+    webhooks_api = with_project_endpoints(
+        (
+            add_project(builder, "webhooks-api", project_path("Webhooks.API"))
+            .with_reference(rabbit_mq)
+            .wait_for(rabbit_mq)
+            .with_reference(webhooks_db)
+            .with_env("Identity__Url", identity_endpoint)
+        ),
+        ENDPOINT_PORTS["webhooks_api"],
     )
 
     (
-        add_project(builder, "order-processor", project_path("OrderProcessor"))
-        .with_reference(rabbit_mq)
-        .wait_for(rabbit_mq)
-        .with_reference(order_db)
-        .wait_for(ordering_api)
-    )
-
-    add_project(builder, "payment-processor", project_path("PaymentProcessor")).with_reference(rabbit_mq).wait_for(
-        rabbit_mq
-    )
-
-    webhooks_api = (
-        add_project(builder, "webhooks-api", project_path("Webhooks.API"))
-        .with_reference(rabbit_mq)
-        .wait_for(rabbit_mq)
-        .with_reference(webhooks_db)
-        .with_env("Identity__Url", identity_endpoint)
-    )
-
-    builder.add_yarp("mobile-bff").with_external_http_endpoints().with_config(configure_mobile_bff_routes)
-
-    webhooks_client = (
-        add_project(builder, "webhooksclient", project_path("WebhookClient"), LAUNCH_PROFILE_NAME)
-        .with_reference(webhooks_api)
-        .with_env("IdentityUrl", identity_endpoint)
-    )
-
-    web_app = (
-        add_project(builder, "webapp", project_path("WebApp"), LAUNCH_PROFILE_NAME)
+        builder.add_yarp("mobile-bff")
+        .with_host_port(port=ENDPOINT_PORTS["mobile_bff"]["http"])
         .with_external_http_endpoints()
-        .with_reference(basket_api)
-        .with_reference(catalog_api)
-        .with_reference(ordering_api)
-        .with_reference(rabbit_mq)
-        .wait_for(rabbit_mq)
-        .wait_for(identity_api)
-        .with_env("IdentityUrl", identity_endpoint)
+        .with_config(configure_mobile_bff_routes)
+    )
+
+    webhooks_client = with_project_endpoints(
+        (
+            add_project(builder, "webhooksclient", project_path("WebhookClient"), LAUNCH_PROFILE_NAME)
+            .with_reference(webhooks_api)
+            .with_env("IdentityUrl", identity_endpoint)
+        ),
+        ENDPOINT_PORTS["webhooks_client"],
+    )
+
+    web_app = with_project_endpoints(
+        (
+            add_project(builder, "webapp", project_path("WebApp"), LAUNCH_PROFILE_NAME)
+            .with_external_http_endpoints()
+            .with_reference(basket_api)
+            .with_reference(catalog_api)
+            .with_reference(ordering_api)
+            .with_reference(rabbit_mq)
+            .wait_for(rabbit_mq)
+            .wait_for(identity_api)
+            .with_env("IdentityUrl", identity_endpoint)
+        ),
+        ENDPOINT_PORTS["web_app"],
     )
 
     web_app.with_env("CallBackUrl", web_app.get_endpoint(LAUNCH_PROFILE_NAME))

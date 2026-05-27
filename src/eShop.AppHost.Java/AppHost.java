@@ -16,57 +16,88 @@ void main(String[] args) throws Exception {
     var orderDb = postgres.addDatabase("orderingdb");
     var webhooksDb = postgres.addDatabase("webhooksdb");
 
-    var identityApi = addProject(builder, "identity-api", projectPath("Identity.API"), launchProfileName)
-        .withExternalHttpEndpoints()
-        .withReference(identityDb, null)
-        .withHttpHealthCheck(new WithHttpHealthCheckOptions().path("/health"));
+    var identityApi = withProjectEndpoints(
+        addProject(builder, "identity-api", projectPath("Identity.API"), launchProfileName)
+            .withExternalHttpEndpoints()
+            .withReference(identityDb, null)
+            .withHttpHealthCheck(new WithHttpHealthCheckOptions().path("/health")),
+        launchProfileName,
+        35223,
+        35243.0);
 
     var identityEndpoint = identityApi.getEndpoint(launchProfileName);
 
-    var basketApi = addProject(builder, "basket-api", projectPath("Basket.API"))
-        .withReference(redis, null)
-        .withReference(rabbitMq, null).waitFor(rabbitMq)
-        .withEnvironment("Identity__Url", identityEndpoint);
+    var basketApi = withProjectEndpoints(
+        addProject(builder, "basket-api", projectPath("Basket.API"))
+            .withReference(redis, null)
+            .withReference(rabbitMq, null).waitFor(rabbitMq)
+            .withEnvironment("Identity__Url", identityEndpoint),
+        launchProfileName,
+        35221);
 
-    var catalogApi = addProject(builder, "catalog-api", projectPath("Catalog.API"))
-        .withReference(rabbitMq, null).waitFor(rabbitMq)
-        .withReference(catalogDb, null);
+    var catalogApi = withProjectEndpoints(
+        addProject(builder, "catalog-api", projectPath("Catalog.API"))
+            .withReference(rabbitMq, null).waitFor(rabbitMq)
+            .withReference(catalogDb, null),
+        launchProfileName,
+        35222);
 
-    var orderingApi = addProject(builder, "ordering-api", projectPath("Ordering.API"))
-        .withReference(rabbitMq, null).waitFor(rabbitMq)
-        .withReference(orderDb, null).waitFor(orderDb)
-        .withHttpHealthCheck(new WithHttpHealthCheckOptions().path("/health"))
-        .withEnvironment("Identity__Url", identityEndpoint);
+    var orderingApi = withProjectEndpoints(
+        addProject(builder, "ordering-api", projectPath("Ordering.API"))
+            .withReference(rabbitMq, null).waitFor(rabbitMq)
+            .withReference(orderDb, null).waitFor(orderDb)
+            .withHttpHealthCheck(new WithHttpHealthCheckOptions().path("/health"))
+            .withEnvironment("Identity__Url", identityEndpoint),
+        launchProfileName,
+        35224);
 
-    addProject(builder, "order-processor", projectPath("OrderProcessor"))
-        .withReference(rabbitMq, null).waitFor(rabbitMq)
-        .withReference(orderDb, null)
-        .waitFor(orderingApi);
+    withProjectEndpoints(
+        addProject(builder, "order-processor", projectPath("OrderProcessor"))
+            .withReference(rabbitMq, null).waitFor(rabbitMq)
+            .withReference(orderDb, null)
+            .waitFor(orderingApi),
+        launchProfileName,
+        46888);
 
-    addProject(builder, "payment-processor", projectPath("PaymentProcessor"))
-        .withReference(rabbitMq, null).waitFor(rabbitMq);
+    withProjectEndpoints(
+        addProject(builder, "payment-processor", projectPath("PaymentProcessor"))
+            .withReference(rabbitMq, null).waitFor(rabbitMq),
+        launchProfileName,
+        35226);
 
-    var webhooksApi = addProject(builder, "webhooks-api", projectPath("Webhooks.API"))
-        .withReference(rabbitMq, null).waitFor(rabbitMq)
-        .withReference(webhooksDb, null)
-        .withEnvironment("Identity__Url", identityEndpoint);
+    var webhooksApi = withProjectEndpoints(
+        addProject(builder, "webhooks-api", projectPath("Webhooks.API"))
+            .withReference(rabbitMq, null).waitFor(rabbitMq)
+            .withReference(webhooksDb, null)
+            .withEnvironment("Identity__Url", identityEndpoint),
+        launchProfileName,
+        35227);
 
     builder.addYarp("mobile-bff")
+        .withHostPort(35080.0)
         .withExternalHttpEndpoints()
         .withConfiguration(yarp -> configureMobileBffRoutes(yarp, catalogApi, orderingApi, identityApi));
 
-    var webhooksClient = addProject(builder, "webhooksclient", projectPath("WebhookClient"), launchProfileName)
-        .withReference(webhooksApi, null)
-        .withEnvironment("IdentityUrl", identityEndpoint);
+    var webhooksClient = withProjectEndpoints(
+        addProject(builder, "webhooksclient", projectPath("WebhookClient"), launchProfileName)
+            .withReference(webhooksApi, null)
+            .withEnvironment("IdentityUrl", identityEndpoint),
+        launchProfileName,
+        35062,
+        37260.0);
 
-    var webApp = addProject(builder, "webapp", projectPath("WebApp"), launchProfileName)
-        .withExternalHttpEndpoints()
-        .withReference(basketApi, null)
-        .withReference(catalogApi, null)
-        .withReference(orderingApi, null)
-        .withReference(rabbitMq, null).waitFor(rabbitMq)
-        .waitFor(identityApi)
-        .withEnvironment("IdentityUrl", identityEndpoint);
+    var webApp = withProjectEndpoints(
+        addProject(builder, "webapp", projectPath("WebApp"), launchProfileName)
+            .withExternalHttpEndpoints()
+            .withReference(basketApi, null)
+            .withReference(catalogApi, null)
+            .withReference(orderingApi, null)
+            .withReference(rabbitMq, null).waitFor(rabbitMq)
+            .waitFor(identityApi)
+            .withEnvironment("IdentityUrl", identityEndpoint),
+        launchProfileName,
+        35045,
+        37298.0);
 
     webApp.withEnvironment("CallBackUrl", webApp.getEndpoint(launchProfileName));
     webhooksClient.withEnvironment("CallBackUrl", webhooksClient.getEndpoint(launchProfileName));
@@ -87,6 +118,18 @@ ProjectResource addProject(IDistributedApplicationBuilder builder, String name, 
 ProjectResource addProject(IDistributedApplicationBuilder builder, String name, String projectPath, String launchProfile) {
     return builder.addProject(name, projectPath, launchProfile)
         .withEnvironment("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true");
+}
+
+ProjectResource withProjectEndpoints(ProjectResource resource, String launchProfileName, double httpPort) {
+    return withProjectEndpoints(resource, launchProfileName, httpPort, null);
+}
+
+ProjectResource withProjectEndpoints(ProjectResource resource, String launchProfileName, double httpPort, Double httpsPort) {
+    resource.withHttpEndpoint(new WithHttpEndpointOptions().name("http").port(httpPort));
+    if ("https".equals(launchProfileName) && httpsPort != null) {
+        resource.withHttpsEndpoint(new WithHttpsEndpointOptions().name("https").port(httpsPort));
+    }
+    return resource;
 }
 
 String projectPath(String name) {

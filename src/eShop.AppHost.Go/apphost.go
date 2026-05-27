@@ -17,6 +17,19 @@ func main() {
 		launchProfileName = "http"
 	}
 
+	endpointPorts := map[string]projectEndpointPorts{
+		"basketApi":        {http: 45221},
+		"catalogApi":       {http: 45222},
+		"identityApi":      {http: 45223, https: 45243},
+		"orderingApi":      {http: 45224},
+		"paymentProcessor": {http: 45226},
+		"webhooksApi":      {http: 45227},
+		"webApp":           {http: 45045, https: 47298},
+		"webhooksClient":   {http: 45062, https: 47260},
+		"orderProcessor":   {http: 56888},
+		"mobileBff":        {http: 45080},
+	}
+
 	redis := builder.AddRedis("redis")
 	rabbitMq := builder.AddRabbitMQ("eventbus").WithPersistentLifetime()
 	postgres := builder.AddPostgres("postgres").
@@ -29,59 +42,96 @@ func main() {
 	orderDb := postgres.AddDatabase("orderingdb")
 	webhooksDb := postgres.AddDatabase("webhooksdb")
 
-	identityApi := addProject(builder, "identity-api", projectPath("Identity.API"), launchProfileName).
-		WithExternalHttpEndpoints().
-		WithReference(identityDb).
-		WithHttpHealthCheck(&aspire.WithHttpHealthCheckOptions{Path: strPtr("/health")})
+	identityApi := withProjectEndpoints(
+		addProject(builder, "identity-api", projectPath("Identity.API"), launchProfileName).
+			WithExternalHttpEndpoints().
+			WithReference(identityDb).
+			WithHttpHealthCheck(&aspire.WithHttpHealthCheckOptions{Path: strPtr("/health")}),
+		launchProfileName,
+		endpointPorts["identityApi"],
+	)
 
 	identityEndpoint := identityApi.GetEndpoint(launchProfileName)
 
-	basketApi := addProject(builder, "basket-api", projectPath("Basket.API"), "").
-		WithReference(redis).
-		WithReference(rabbitMq).WaitFor(rabbitMq).
-		WithEnvironment("Identity__Url", identityEndpoint)
+	basketApi := withProjectEndpoints(
+		addProject(builder, "basket-api", projectPath("Basket.API"), "").
+			WithReference(redis).
+			WithReference(rabbitMq).WaitFor(rabbitMq).
+			WithEnvironment("Identity__Url", identityEndpoint),
+		launchProfileName,
+		endpointPorts["basketApi"],
+	)
 
-	catalogApi := addProject(builder, "catalog-api", projectPath("Catalog.API"), "").
-		WithReference(rabbitMq).WaitFor(rabbitMq).
-		WithReference(catalogDb)
+	catalogApi := withProjectEndpoints(
+		addProject(builder, "catalog-api", projectPath("Catalog.API"), "").
+			WithReference(rabbitMq).WaitFor(rabbitMq).
+			WithReference(catalogDb),
+		launchProfileName,
+		endpointPorts["catalogApi"],
+	)
 
-	orderingApi := addProject(builder, "ordering-api", projectPath("Ordering.API"), "").
-		WithReference(rabbitMq).WaitFor(rabbitMq).
-		WithReference(orderDb).WaitFor(orderDb).
-		WithHttpHealthCheck(&aspire.WithHttpHealthCheckOptions{Path: strPtr("/health")}).
-		WithEnvironment("Identity__Url", identityEndpoint)
+	orderingApi := withProjectEndpoints(
+		addProject(builder, "ordering-api", projectPath("Ordering.API"), "").
+			WithReference(rabbitMq).WaitFor(rabbitMq).
+			WithReference(orderDb).WaitFor(orderDb).
+			WithHttpHealthCheck(&aspire.WithHttpHealthCheckOptions{Path: strPtr("/health")}).
+			WithEnvironment("Identity__Url", identityEndpoint),
+		launchProfileName,
+		endpointPorts["orderingApi"],
+	)
 
-	addProject(builder, "order-processor", projectPath("OrderProcessor"), "").
-		WithReference(rabbitMq).WaitFor(rabbitMq).
-		WithReference(orderDb).
-		WaitFor(orderingApi)
+	withProjectEndpoints(
+		addProject(builder, "order-processor", projectPath("OrderProcessor"), "").
+			WithReference(rabbitMq).WaitFor(rabbitMq).
+			WithReference(orderDb).
+			WaitFor(orderingApi),
+		launchProfileName,
+		endpointPorts["orderProcessor"],
+	)
 
-	addProject(builder, "payment-processor", projectPath("PaymentProcessor"), "").
-		WithReference(rabbitMq).WaitFor(rabbitMq)
+	withProjectEndpoints(
+		addProject(builder, "payment-processor", projectPath("PaymentProcessor"), "").
+			WithReference(rabbitMq).WaitFor(rabbitMq),
+		launchProfileName,
+		endpointPorts["paymentProcessor"],
+	)
 
-	webhooksApi := addProject(builder, "webhooks-api", projectPath("Webhooks.API"), "").
-		WithReference(rabbitMq).WaitFor(rabbitMq).
-		WithReference(webhooksDb).
-		WithEnvironment("Identity__Url", identityEndpoint)
+	webhooksApi := withProjectEndpoints(
+		addProject(builder, "webhooks-api", projectPath("Webhooks.API"), "").
+			WithReference(rabbitMq).WaitFor(rabbitMq).
+			WithReference(webhooksDb).
+			WithEnvironment("Identity__Url", identityEndpoint),
+		launchProfileName,
+		endpointPorts["webhooksApi"],
+	)
 
 	builder.AddYarp("mobile-bff").
+		WithHostPort(endpointPorts["mobileBff"].http).
 		WithExternalHttpEndpoints().
 		WithConfiguration(func(yarp aspire.YarpConfigurationBuilder) {
 			configureMobileBffRoutes(yarp, catalogApi, orderingApi, identityApi)
 		})
 
-	webhooksClient := addProject(builder, "webhooksclient", projectPath("WebhookClient"), launchProfileName).
-		WithReference(webhooksApi).
-		WithEnvironment("IdentityUrl", identityEndpoint)
+	webhooksClient := withProjectEndpoints(
+		addProject(builder, "webhooksclient", projectPath("WebhookClient"), launchProfileName).
+			WithReference(webhooksApi).
+			WithEnvironment("IdentityUrl", identityEndpoint),
+		launchProfileName,
+		endpointPorts["webhooksClient"],
+	)
 
-	webApp := addProject(builder, "webapp", projectPath("WebApp"), launchProfileName).
-		WithExternalHttpEndpoints().
-		WithReference(basketApi).
-		WithReference(catalogApi).
-		WithReference(orderingApi).
-		WithReference(rabbitMq).WaitFor(rabbitMq).
-		WaitFor(identityApi).
-		WithEnvironment("IdentityUrl", identityEndpoint)
+	webApp := withProjectEndpoints(
+		addProject(builder, "webapp", projectPath("WebApp"), launchProfileName).
+			WithExternalHttpEndpoints().
+			WithReference(basketApi).
+			WithReference(catalogApi).
+			WithReference(orderingApi).
+			WithReference(rabbitMq).WaitFor(rabbitMq).
+			WaitFor(identityApi).
+			WithEnvironment("IdentityUrl", identityEndpoint),
+		launchProfileName,
+		endpointPorts["webApp"],
+	)
 
 	webApp.WithEnvironment("CallBackUrl", webApp.GetEndpoint(launchProfileName))
 	webhooksClient.WithEnvironment("CallBackUrl", webhooksClient.GetEndpoint(launchProfileName))
@@ -113,6 +163,25 @@ func addProject(builder aspire.DistributedApplicationBuilder, name, path, launch
 	}
 	return builder.AddProject(name, path, options...).
 		WithEnvironment("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true")
+}
+
+type projectEndpointPorts struct {
+	http  float64
+	https float64
+}
+
+func withProjectEndpoints(resource aspire.ProjectResource, launchProfile string, ports projectEndpointPorts) aspire.ProjectResource {
+	resource = resource.WithHttpEndpoint(&aspire.WithHttpEndpointOptions{
+		Name: strPtr("http"),
+		Port: floatPtr(ports.http),
+	})
+	if launchProfile == "https" && ports.https != 0 {
+		resource = resource.WithHttpsEndpoint(&aspire.WithHttpsEndpointOptions{
+			Name: strPtr("https"),
+			Port: floatPtr(ports.https),
+		})
+	}
+	return resource
 }
 
 func projectPath(name string) string {
@@ -156,5 +225,9 @@ func apiVersion(values ...string) *aspire.YarpRouteQueryParameterMatch {
 }
 
 func strPtr(value string) *string {
+	return &value
+}
+
+func floatPtr(value float64) *float64 {
 	return &value
 }

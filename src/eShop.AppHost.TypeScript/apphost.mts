@@ -11,9 +11,36 @@ const builder = await createBuilder();
 const launchProfileName = process.env.ESHOP_USE_HTTP_ENDPOINTS === '1' ? 'http' : 'https';
 const projectPath = (name: string) => `../${name}/${name}.csproj`;
 
+type ProjectEndpointPorts = { http: number; https?: number };
+
+const endpointPorts = {
+  basketApi: { http: 15221 },
+  catalogApi: { http: 15222 },
+  identityApi: { http: 15223, https: 15243 },
+  orderingApi: { http: 15224 },
+  paymentProcessor: { http: 15226 },
+  webhooksApi: { http: 15227 },
+  webApp: { http: 15045, https: 17298 },
+  webhooksClient: { http: 15062, https: 17260 },
+  orderProcessor: { http: 26888 },
+  mobileBff: { http: 15080 },
+} satisfies Record<string, ProjectEndpointPorts>;
+
 const addProject = (name: string, path: string, launchProfile?: string) =>
   builder.addProject(name, path, { launchProfileOrOptions: launchProfile })
     .withEnvironment('ASPNETCORE_FORWARDEDHEADERS_ENABLED', 'true');
+
+const withProjectEndpoints = async (
+  resource: ProjectResource | PromiseLike<ProjectResource>,
+  ports: ProjectEndpointPorts,
+) => {
+  let configured = await resource;
+  configured = await configured.withHttpEndpoint({ name: 'http', port: ports.http });
+  if (launchProfileName === 'https' && ports.https !== undefined) {
+    configured = await configured.withHttpsEndpoint({ name: 'https', port: ports.https });
+  }
+  return configured;
+};
 
 const redis = await builder.addRedis('redis');
 const rabbitMq = await builder.addRabbitMQ('eventbus').withPersistentLifetime();
@@ -27,57 +54,85 @@ const identityDb = await postgres.addDatabase('identitydb');
 const orderDb = await postgres.addDatabase('orderingdb');
 const webhooksDb = await postgres.addDatabase('webhooksdb');
 
-const identityApi = await addProject('identity-api', projectPath('Identity.API'), launchProfileName)
-  .withExternalHttpEndpoints()
-  .withReference(identityDb)
-  .withHttpHealthCheck({ path: '/health' });
+const identityApi = await withProjectEndpoints(
+  addProject('identity-api', projectPath('Identity.API'), launchProfileName)
+    .withExternalHttpEndpoints()
+    .withReference(identityDb)
+    .withHttpHealthCheck({ path: '/health' }),
+  endpointPorts.identityApi,
+);
 
 const identityEndpoint = identityApi.getEndpoint(launchProfileName);
 
-const basketApi = await addProject('basket-api', projectPath('Basket.API'))
-  .withReference(redis)
-  .withReference(rabbitMq).waitFor(rabbitMq)
-  .withEnvironment('Identity__Url', identityEndpoint);
+const basketApi = await withProjectEndpoints(
+  addProject('basket-api', projectPath('Basket.API'))
+    .withReference(redis)
+    .withReference(rabbitMq).waitFor(rabbitMq)
+    .withEnvironment('Identity__Url', identityEndpoint),
+  endpointPorts.basketApi,
+);
 
-const catalogApi = await addProject('catalog-api', projectPath('Catalog.API'))
-  .withReference(rabbitMq).waitFor(rabbitMq)
-  .withReference(catalogDb);
+const catalogApi = await withProjectEndpoints(
+  addProject('catalog-api', projectPath('Catalog.API'))
+    .withReference(rabbitMq).waitFor(rabbitMq)
+    .withReference(catalogDb),
+  endpointPorts.catalogApi,
+);
 
-const orderingApi = await addProject('ordering-api', projectPath('Ordering.API'))
-  .withReference(rabbitMq).waitFor(rabbitMq)
-  .withReference(orderDb).waitFor(orderDb)
-  .withHttpHealthCheck({ path: '/health' })
-  .withEnvironment('Identity__Url', identityEndpoint);
+const orderingApi = await withProjectEndpoints(
+  addProject('ordering-api', projectPath('Ordering.API'))
+    .withReference(rabbitMq).waitFor(rabbitMq)
+    .withReference(orderDb).waitFor(orderDb)
+    .withHttpHealthCheck({ path: '/health' })
+    .withEnvironment('Identity__Url', identityEndpoint),
+  endpointPorts.orderingApi,
+);
 
-await addProject('order-processor', projectPath('OrderProcessor'))
-  .withReference(rabbitMq).waitFor(rabbitMq)
-  .withReference(orderDb)
-  .waitFor(orderingApi);
+await withProjectEndpoints(
+  addProject('order-processor', projectPath('OrderProcessor'))
+    .withReference(rabbitMq).waitFor(rabbitMq)
+    .withReference(orderDb)
+    .waitFor(orderingApi),
+  endpointPorts.orderProcessor,
+);
 
-await addProject('payment-processor', projectPath('PaymentProcessor'))
-  .withReference(rabbitMq).waitFor(rabbitMq);
+await withProjectEndpoints(
+  addProject('payment-processor', projectPath('PaymentProcessor'))
+    .withReference(rabbitMq).waitFor(rabbitMq),
+  endpointPorts.paymentProcessor,
+);
 
-const webHooksApi = await addProject('webhooks-api', projectPath('Webhooks.API'))
-  .withReference(rabbitMq).waitFor(rabbitMq)
-  .withReference(webhooksDb)
-  .withEnvironment('Identity__Url', identityEndpoint);
+const webHooksApi = await withProjectEndpoints(
+  addProject('webhooks-api', projectPath('Webhooks.API'))
+    .withReference(rabbitMq).waitFor(rabbitMq)
+    .withReference(webhooksDb)
+    .withEnvironment('Identity__Url', identityEndpoint),
+  endpointPorts.webhooksApi,
+);
 
 await builder.addYarp('mobile-bff')
+  .withHostPort({ port: endpointPorts.mobileBff.http })
   .withExternalHttpEndpoints()
   .withConfiguration(configureMobileBffRoutes);
 
-const webhooksClient = await addProject('webhooksclient', projectPath('WebhookClient'), launchProfileName)
-  .withReference(webHooksApi)
-  .withEnvironment('IdentityUrl', identityEndpoint);
+const webhooksClient = await withProjectEndpoints(
+  addProject('webhooksclient', projectPath('WebhookClient'), launchProfileName)
+    .withReference(webHooksApi)
+    .withEnvironment('IdentityUrl', identityEndpoint),
+  endpointPorts.webhooksClient,
+);
 
-const webApp = await addProject('webapp', projectPath('WebApp'), launchProfileName)
-  .withExternalHttpEndpoints()
-  .withReference(basketApi)
-  .withReference(catalogApi)
-  .withReference(orderingApi)
-  .withReference(rabbitMq).waitFor(rabbitMq)
-  .waitFor(identityApi)
-  .withEnvironment('IdentityUrl', identityEndpoint);
+const webApp = await withProjectEndpoints(
+  addProject('webapp', projectPath('WebApp'), launchProfileName)
+    .withExternalHttpEndpoints()
+    .withReference(basketApi)
+    .withReference(catalogApi)
+    .withReference(orderingApi)
+    .withReference(rabbitMq).waitFor(rabbitMq)
+    .waitFor(identityApi)
+    .withEnvironment('IdentityUrl', identityEndpoint),
+  endpointPorts.webApp,
+);
 
 await webApp.withEnvironment('CallBackUrl', webApp.getEndpoint(launchProfileName));
 await webhooksClient.withEnvironment('CallBackUrl', webhooksClient.getEndpoint(launchProfileName));
