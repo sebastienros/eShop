@@ -83,7 +83,7 @@ Login to the dashboard at: http://localhost:19888/login?t=uniquelogincodeforyou
 
 ### Polyglot Aspire AppHosts
 
-This repository also includes experimental Aspire AppHosts for TypeScript, Python, Java, and Go under `src/eShop.AppHost.*`. They model the same eShop resources as the canonical .NET AppHost and use the locally installed Aspire 13.4 preview SDK.
+This repository also includes experimental Aspire AppHosts for TypeScript, Python, Java, and Go under `src/eShop.AppHost.*`. They model the same eShop resources as the canonical .NET AppHost and use the Aspire 13.5 staging SDK.
 
 Enable the experimental polyglot runtimes once:
 
