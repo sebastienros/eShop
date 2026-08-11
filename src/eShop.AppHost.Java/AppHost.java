@@ -22,8 +22,7 @@ void main(String[] args) throws Exception {
             .withReference(identityDb, null)
             .withHttpHealthCheck(new WithHttpHealthCheckOptions().path("/health")),
         launchProfileName,
-        35223,
-        35243.0);
+        true);
 
     var identityEndpoint = identityApi.getEndpoint(launchProfileName);
 
@@ -32,15 +31,13 @@ void main(String[] args) throws Exception {
             .withReference(redis, null)
             .withReference(rabbitMq, null).waitFor(rabbitMq)
             .withEnvironment("Identity__Url", identityEndpoint),
-        launchProfileName,
-        35221);
+        launchProfileName);
 
     var catalogApi = withProjectEndpoints(
         addProject(builder, "catalog-api", projectPath("Catalog.API"))
             .withReference(rabbitMq, null).waitFor(rabbitMq)
             .withReference(catalogDb, null),
-        launchProfileName,
-        35222);
+        launchProfileName);
 
     var orderingApi = withProjectEndpoints(
         addProject(builder, "ordering-api", projectPath("Ordering.API"))
@@ -48,33 +45,28 @@ void main(String[] args) throws Exception {
             .withReference(orderDb, null).waitFor(orderDb)
             .withHttpHealthCheck(new WithHttpHealthCheckOptions().path("/health"))
             .withEnvironment("Identity__Url", identityEndpoint),
-        launchProfileName,
-        35224);
+        launchProfileName);
 
     withProjectEndpoints(
         addProject(builder, "order-processor", projectPath("OrderProcessor"))
             .withReference(rabbitMq, null).waitFor(rabbitMq)
             .withReference(orderDb, null)
             .waitFor(orderingApi),
-        launchProfileName,
-        46888);
+        launchProfileName);
 
     withProjectEndpoints(
         addProject(builder, "payment-processor", projectPath("PaymentProcessor"))
             .withReference(rabbitMq, null).waitFor(rabbitMq),
-        launchProfileName,
-        35226);
+        launchProfileName);
 
     var webhooksApi = withProjectEndpoints(
         addProject(builder, "webhooks-api", projectPath("Webhooks.API"))
             .withReference(rabbitMq, null).waitFor(rabbitMq)
             .withReference(webhooksDb, null)
             .withEnvironment("Identity__Url", identityEndpoint),
-        launchProfileName,
-        35227);
+        launchProfileName);
 
     builder.addYarp("mobile-bff")
-        .withHostPort(35080.0)
         .withExternalHttpEndpoints()
         .withConfiguration(yarp -> configureMobileBffRoutes(yarp, catalogApi, orderingApi, identityApi));
 
@@ -83,8 +75,7 @@ void main(String[] args) throws Exception {
             .withReference(webhooksApi, null)
             .withEnvironment("IdentityUrl", identityEndpoint),
         launchProfileName,
-        35062,
-        37260.0);
+        true);
 
     var webApp = withProjectEndpoints(
         addProject(builder, "webapp", projectPath("WebApp"), launchProfileName)
@@ -96,8 +87,7 @@ void main(String[] args) throws Exception {
             .waitFor(identityApi)
             .withEnvironment("IdentityUrl", identityEndpoint),
         launchProfileName,
-        35045,
-        37298.0);
+        true);
 
     webApp.withEnvironment("CallBackUrl", webApp.getEndpoint(launchProfileName));
     webhooksClient.withEnvironment("CallBackUrl", webhooksClient.getEndpoint(launchProfileName));
@@ -120,14 +110,19 @@ ProjectResource addProject(IDistributedApplicationBuilder builder, String name, 
         .withEnvironment("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true");
 }
 
-ProjectResource withProjectEndpoints(ProjectResource resource, String launchProfileName, double httpPort) {
-    return withProjectEndpoints(resource, launchProfileName, httpPort, null);
+ProjectResource withProjectEndpoints(ProjectResource resource, String launchProfileName) {
+    return withProjectEndpoints(resource, launchProfileName, false);
 }
 
-ProjectResource withProjectEndpoints(ProjectResource resource, String launchProfileName, double httpPort, Double httpsPort) {
-    resource.withHttpEndpoint(new WithHttpEndpointOptions().name("http").port(httpPort));
-    if ("https".equals(launchProfileName) && httpsPort != null) {
-        resource.withHttpsEndpoint(new WithHttpsEndpointOptions().name("https").port(httpsPort));
+ProjectResource withProjectEndpoints(ProjectResource resource, String launchProfileName, boolean hasHttps) {
+    // Zero clears the desired host port so DCP allocates one dynamically.
+    resource.withHttpEndpointCallback(
+        endpoint -> endpoint.setPort(0),
+        new WithHttpEndpointCallbackOptions().name("http"));
+    if ("https".equals(launchProfileName) && hasHttps) {
+        resource.withHttpsEndpointCallback(
+            endpoint -> endpoint.setPort(0),
+            new WithHttpsEndpointCallbackOptions().name("https"));
     }
     return resource;
 }

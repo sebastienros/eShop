@@ -11,33 +11,24 @@ const builder = await createBuilder();
 const launchProfileName = process.env.ESHOP_USE_HTTP_ENDPOINTS === '1' ? 'http' : 'https';
 const projectPath = (name: string) => `../${name}/${name}.csproj`;
 
-type ProjectEndpointPorts = { http: number; https?: number };
-
-const endpointPorts = {
-  basketApi: { http: 15221 },
-  catalogApi: { http: 15222 },
-  identityApi: { http: 15223, https: 15243 },
-  orderingApi: { http: 15224 },
-  paymentProcessor: { http: 15226 },
-  webhooksApi: { http: 15227 },
-  webApp: { http: 15045, https: 17298 },
-  webhooksClient: { http: 15062, https: 17260 },
-  orderProcessor: { http: 26888 },
-  mobileBff: { http: 15080 },
-} satisfies Record<string, ProjectEndpointPorts>;
-
 const addProject = (name: string, path: string, launchProfile?: string) =>
   builder.addProject(name, path, { launchProfileOrOptions: launchProfile })
     .withEnvironment('ASPNETCORE_FORWARDEDHEADERS_ENABLED', 'true');
 
 const withProjectEndpoints = async (
   resource: ProjectResource | PromiseLike<ProjectResource>,
-  ports: ProjectEndpointPorts,
+  hasHttps = false,
 ) => {
   let configured = await resource;
-  configured = await configured.withHttpEndpoint({ name: 'http', port: ports.http });
-  if (launchProfileName === 'https' && ports.https !== undefined) {
-    configured = await configured.withHttpsEndpoint({ name: 'https', port: ports.https });
+  configured = await configured.withHttpEndpointCallback(
+    endpoint => endpoint.port.set(null),
+    { name: 'http' },
+  );
+  if (launchProfileName === 'https' && hasHttps) {
+    configured = await configured.withHttpsEndpointCallback(
+      endpoint => endpoint.port.set(null),
+      { name: 'https' },
+    );
   }
   return configured;
 };
@@ -59,7 +50,7 @@ const identityApi = await withProjectEndpoints(
     .withExternalHttpEndpoints()
     .withReference(identityDb)
     .withHttpHealthCheck({ path: '/health' }),
-  endpointPorts.identityApi,
+  true,
 );
 
 const identityEndpoint = identityApi.getEndpoint(launchProfileName);
@@ -69,14 +60,12 @@ const basketApi = await withProjectEndpoints(
     .withReference(redis)
     .withReference(rabbitMq).waitFor(rabbitMq)
     .withEnvironment('Identity__Url', identityEndpoint),
-  endpointPorts.basketApi,
 );
 
 const catalogApi = await withProjectEndpoints(
   addProject('catalog-api', projectPath('Catalog.API'))
     .withReference(rabbitMq).waitFor(rabbitMq)
     .withReference(catalogDb),
-  endpointPorts.catalogApi,
 );
 
 const orderingApi = await withProjectEndpoints(
@@ -85,7 +74,6 @@ const orderingApi = await withProjectEndpoints(
     .withReference(orderDb).waitFor(orderDb)
     .withHttpHealthCheck({ path: '/health' })
     .withEnvironment('Identity__Url', identityEndpoint),
-  endpointPorts.orderingApi,
 );
 
 await withProjectEndpoints(
@@ -93,13 +81,11 @@ await withProjectEndpoints(
     .withReference(rabbitMq).waitFor(rabbitMq)
     .withReference(orderDb)
     .waitFor(orderingApi),
-  endpointPorts.orderProcessor,
 );
 
 await withProjectEndpoints(
   addProject('payment-processor', projectPath('PaymentProcessor'))
     .withReference(rabbitMq).waitFor(rabbitMq),
-  endpointPorts.paymentProcessor,
 );
 
 const webHooksApi = await withProjectEndpoints(
@@ -107,11 +93,9 @@ const webHooksApi = await withProjectEndpoints(
     .withReference(rabbitMq).waitFor(rabbitMq)
     .withReference(webhooksDb)
     .withEnvironment('Identity__Url', identityEndpoint),
-  endpointPorts.webhooksApi,
 );
 
 await builder.addYarp('mobile-bff')
-  .withHostPort({ port: endpointPorts.mobileBff.http })
   .withExternalHttpEndpoints()
   .withConfiguration(configureMobileBffRoutes);
 
@@ -119,7 +103,7 @@ const webhooksClient = await withProjectEndpoints(
   addProject('webhooksclient', projectPath('WebhookClient'), launchProfileName)
     .withReference(webHooksApi)
     .withEnvironment('IdentityUrl', identityEndpoint),
-  endpointPorts.webhooksClient,
+  true,
 );
 
 const webApp = await withProjectEndpoints(
@@ -131,7 +115,7 @@ const webApp = await withProjectEndpoints(
     .withReference(rabbitMq).waitFor(rabbitMq)
     .waitFor(identityApi)
     .withEnvironment('IdentityUrl', identityEndpoint),
-  endpointPorts.webApp,
+  true,
 );
 
 await webApp.withEnvironment('CallBackUrl', webApp.getEndpoint(launchProfileName));

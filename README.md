@@ -102,7 +102,7 @@ cd src/eShop.AppHost.Java && aspire run
 cd src/eShop.AppHost.Go && aspire run
 ```
 
-Each polyglot AppHost assigns a unique host-port range for the eShop project endpoints so the TypeScript, Python, Java, and Go stacks can run side-by-side on the same machine.
+Each polyglot AppHost lets Aspire allocate project and proxy host ports dynamically, so the TypeScript, Python, Java, and Go stacks can run side-by-side without predefined port ranges.
 
 ### Azure Open AI
 

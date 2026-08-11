@@ -17,19 +17,6 @@ func main() {
 		launchProfileName = "http"
 	}
 
-	endpointPorts := map[string]projectEndpointPorts{
-		"basketApi":        {http: 45221},
-		"catalogApi":       {http: 45222},
-		"identityApi":      {http: 45223, https: 45243},
-		"orderingApi":      {http: 45224},
-		"paymentProcessor": {http: 45226},
-		"webhooksApi":      {http: 45227},
-		"webApp":           {http: 45045, https: 47298},
-		"webhooksClient":   {http: 45062, https: 47260},
-		"orderProcessor":   {http: 56888},
-		"mobileBff":        {http: 45080},
-	}
-
 	redis := builder.AddRedis("redis")
 	rabbitMq := builder.AddRabbitMQ("eventbus").WithPersistentLifetime()
 	postgres := builder.AddPostgres("postgres").
@@ -48,7 +35,7 @@ func main() {
 			WithReference(identityDb).
 			WithHttpHealthCheck(&aspire.WithHttpHealthCheckOptions{Path: strPtr("/health")}),
 		launchProfileName,
-		endpointPorts["identityApi"],
+		true,
 	)
 
 	identityEndpoint := identityApi.GetEndpoint(launchProfileName)
@@ -59,7 +46,7 @@ func main() {
 			WithReference(rabbitMq).WaitFor(rabbitMq).
 			WithEnvironment("Identity__Url", identityEndpoint),
 		launchProfileName,
-		endpointPorts["basketApi"],
+		false,
 	)
 
 	catalogApi := withProjectEndpoints(
@@ -67,7 +54,7 @@ func main() {
 			WithReference(rabbitMq).WaitFor(rabbitMq).
 			WithReference(catalogDb),
 		launchProfileName,
-		endpointPorts["catalogApi"],
+		false,
 	)
 
 	orderingApi := withProjectEndpoints(
@@ -77,7 +64,7 @@ func main() {
 			WithHttpHealthCheck(&aspire.WithHttpHealthCheckOptions{Path: strPtr("/health")}).
 			WithEnvironment("Identity__Url", identityEndpoint),
 		launchProfileName,
-		endpointPorts["orderingApi"],
+		false,
 	)
 
 	withProjectEndpoints(
@@ -86,14 +73,14 @@ func main() {
 			WithReference(orderDb).
 			WaitFor(orderingApi),
 		launchProfileName,
-		endpointPorts["orderProcessor"],
+		false,
 	)
 
 	withProjectEndpoints(
 		addProject(builder, "payment-processor", projectPath("PaymentProcessor"), "").
 			WithReference(rabbitMq).WaitFor(rabbitMq),
 		launchProfileName,
-		endpointPorts["paymentProcessor"],
+		false,
 	)
 
 	webhooksApi := withProjectEndpoints(
@@ -102,11 +89,10 @@ func main() {
 			WithReference(webhooksDb).
 			WithEnvironment("Identity__Url", identityEndpoint),
 		launchProfileName,
-		endpointPorts["webhooksApi"],
+		false,
 	)
 
 	builder.AddYarp("mobile-bff").
-		WithHostPort(endpointPorts["mobileBff"].http).
 		WithExternalHttpEndpoints().
 		WithConfiguration(func(yarp aspire.YarpConfigurationBuilder) {
 			configureMobileBffRoutes(yarp, catalogApi, orderingApi, identityApi)
@@ -117,7 +103,7 @@ func main() {
 			WithReference(webhooksApi).
 			WithEnvironment("IdentityUrl", identityEndpoint),
 		launchProfileName,
-		endpointPorts["webhooksClient"],
+		true,
 	)
 
 	webApp := withProjectEndpoints(
@@ -130,7 +116,7 @@ func main() {
 			WaitFor(identityApi).
 			WithEnvironment("IdentityUrl", identityEndpoint),
 		launchProfileName,
-		endpointPorts["webApp"],
+		true,
 	)
 
 	webApp.WithEnvironment("CallBackUrl", webApp.GetEndpoint(launchProfileName))
@@ -165,20 +151,18 @@ func addProject(builder aspire.DistributedApplicationBuilder, name, path, launch
 		WithEnvironment("ASPNETCORE_FORWARDEDHEADERS_ENABLED", "true")
 }
 
-type projectEndpointPorts struct {
-	http  float64
-	https float64
-}
-
-func withProjectEndpoints(resource aspire.ProjectResource, launchProfile string, ports projectEndpointPorts) aspire.ProjectResource {
-	resource = resource.WithHttpEndpoint(&aspire.WithHttpEndpointOptions{
+func withProjectEndpoints(resource aspire.ProjectResource, launchProfile string, hasHttps bool) aspire.ProjectResource {
+	// Zero clears the desired host port so DCP allocates one dynamically.
+	resource = resource.WithHttpEndpointCallback(func(endpoint aspire.EndpointUpdateContext) {
+		endpoint.SetPort(0)
+	}, &aspire.WithHttpEndpointCallbackOptions{
 		Name: strPtr("http"),
-		Port: floatPtr(ports.http),
 	})
-	if launchProfile == "https" && ports.https != 0 {
-		resource = resource.WithHttpsEndpoint(&aspire.WithHttpsEndpointOptions{
+	if launchProfile == "https" && hasHttps {
+		resource = resource.WithHttpsEndpointCallback(func(endpoint aspire.EndpointUpdateContext) {
+			endpoint.SetPort(0)
+		}, &aspire.WithHttpsEndpointCallbackOptions{
 			Name: strPtr("https"),
-			Port: floatPtr(ports.https),
 		})
 	}
 	return resource

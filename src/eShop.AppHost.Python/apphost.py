@@ -2,20 +2,6 @@ from aspire_app import create_builder
 
 LAUNCH_PROFILE_NAME = "http" if __import__("os").environ.get("ESHOP_USE_HTTP_ENDPOINTS") == "1" else "https"
 
-ENDPOINT_PORTS = {
-    "basket_api": {"http": 25221},
-    "catalog_api": {"http": 25222},
-    "identity_api": {"http": 25223, "https": 25243},
-    "ordering_api": {"http": 25224},
-    "payment_processor": {"http": 25226},
-    "webhooks_api": {"http": 25227},
-    "web_app": {"http": 25045, "https": 27298},
-    "webhooks_client": {"http": 25062, "https": 27260},
-    "order_processor": {"http": 36888},
-    "mobile_bff": {"http": 25080},
-}
-
-
 def project_path(name: str) -> str:
     return f"../{name}/{name}.csproj"
 
@@ -38,10 +24,14 @@ def catalog_route(yarp, catalog_cluster, path: str, versions: list[str]):
     )
 
 
-def with_project_endpoints(resource, ports: dict[str, int]):
-    resource.with_http_endpoint(name="http", port=ports["http"])
-    if LAUNCH_PROFILE_NAME == "https" and "https" in ports:
-        resource.with_https_endpoint(name="https", port=ports["https"])
+def use_dynamic_port(endpoint):
+    endpoint.port = None
+
+
+def with_project_endpoints(resource, has_https: bool = False):
+    resource.with_http_endpoint_callback(use_dynamic_port, name="http")
+    if LAUNCH_PROFILE_NAME == "https" and has_https:
+        resource.with_https_endpoint_callback(use_dynamic_port, name="https")
     return resource
 
 
@@ -90,7 +80,7 @@ with create_builder() as builder:
             .with_reference(identity_db)
             .with_http_health_check(path="/health")
         ),
-        ENDPOINT_PORTS["identity_api"],
+        True,
     )
 
     identity_endpoint = identity_api.get_endpoint(LAUNCH_PROFILE_NAME)
@@ -103,7 +93,6 @@ with create_builder() as builder:
             .wait_for(rabbit_mq)
             .with_env("Identity__Url", identity_endpoint)
         ),
-        ENDPOINT_PORTS["basket_api"],
     )
 
     catalog_api = with_project_endpoints(
@@ -113,7 +102,6 @@ with create_builder() as builder:
             .wait_for(rabbit_mq)
             .with_reference(catalog_db)
         ),
-        ENDPOINT_PORTS["catalog_api"],
     )
 
     ordering_api = with_project_endpoints(
@@ -126,7 +114,6 @@ with create_builder() as builder:
             .with_http_health_check(path="/health")
             .with_env("Identity__Url", identity_endpoint)
         ),
-        ENDPOINT_PORTS["ordering_api"],
     )
 
     with_project_endpoints(
@@ -137,14 +124,12 @@ with create_builder() as builder:
             .with_reference(order_db)
             .wait_for(ordering_api)
         ),
-        ENDPOINT_PORTS["order_processor"],
     )
 
     with_project_endpoints(
         add_project(builder, "payment-processor", project_path("PaymentProcessor")).with_reference(rabbit_mq).wait_for(
             rabbit_mq
         ),
-        ENDPOINT_PORTS["payment_processor"],
     )
 
     webhooks_api = with_project_endpoints(
@@ -155,12 +140,10 @@ with create_builder() as builder:
             .with_reference(webhooks_db)
             .with_env("Identity__Url", identity_endpoint)
         ),
-        ENDPOINT_PORTS["webhooks_api"],
     )
 
     (
         builder.add_yarp("mobile-bff")
-        .with_host_port(port=ENDPOINT_PORTS["mobile_bff"]["http"])
         .with_external_http_endpoints()
         .with_config(configure_mobile_bff_routes)
     )
@@ -171,7 +154,7 @@ with create_builder() as builder:
             .with_reference(webhooks_api)
             .with_env("IdentityUrl", identity_endpoint)
         ),
-        ENDPOINT_PORTS["webhooks_client"],
+        True,
     )
 
     web_app = with_project_endpoints(
@@ -186,7 +169,7 @@ with create_builder() as builder:
             .wait_for(identity_api)
             .with_env("IdentityUrl", identity_endpoint)
         ),
-        ENDPOINT_PORTS["web_app"],
+        True,
     )
 
     web_app.with_env("CallBackUrl", web_app.get_endpoint(LAUNCH_PROFILE_NAME))
