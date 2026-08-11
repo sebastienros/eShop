@@ -7,6 +7,7 @@ import {
 } from './.aspire/modules/aspire.mjs';
 
 const builder = await createBuilder();
+await builder.addAzureContainerAppEnvironment('aca');
 
 const launchProfileName = process.env.ESHOP_USE_HTTP_ENDPOINTS === '1' ? 'http' : 'https';
 const projectPath = (name: string) => `../${name}/${name}.csproj`;

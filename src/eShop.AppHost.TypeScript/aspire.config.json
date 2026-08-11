@@ -21,6 +21,7 @@
     "Aspire.Hosting.Redis": "13.5.0",
     "Aspire.Hosting.PostgreSQL": "13.5.0",
     "Aspire.Hosting.RabbitMQ": "13.5.0",
-    "Aspire.Hosting.Yarp": "13.5.0"
+    "Aspire.Hosting.Yarp": "13.5.0",
+    "Aspire.Hosting.Azure.AppContainers": "13.5.0"
   }
 }

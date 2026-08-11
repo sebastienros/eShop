@@ -104,6 +104,18 @@ cd src/eShop.AppHost.Go && aspire run
 
 Each polyglot AppHost lets Aspire allocate project and proxy host ports dynamically, so the TypeScript, Python, Java, and Go stacks can run side-by-side without predefined port ranges.
 
+Deploy the TypeScript AppHost to Azure Container Apps:
+
+```sh
+Azure__SubscriptionId='<subscription-id>' \
+Azure__Location='<azure-region>' \
+Azure__ResourceGroup='<resource-group>' \
+ESHOP_USE_HTTP_ENDPOINTS=1 \
+aspire deploy --apphost src/eShop.AppHost.TypeScript --environment Production
+```
+
+The HTTP launch profiles provide one ingress endpoint per project; Azure Container Apps exposes public endpoints over HTTPS.
+
 ### Azure Open AI
 
 When using Azure OpenAI, inside *eShop.AppHost/appsettings.json*, add the following section:
